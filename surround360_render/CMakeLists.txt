@@ -13,7 +13,7 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/source/camera_isp)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/source/calibration)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/source/render)
 INCLUDE_DIRECTORIES(${CMAKE_BINARY_DIR})
-INCLUDE_DIRECTORIES(/usr/local/include/eigen3)
+INCLUDE_DIRECTORIES(/usr/include/eigen3)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # required for clang, including AppleClang

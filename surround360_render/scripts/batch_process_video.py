@@ -15,8 +15,8 @@ from os import listdir, system
 from os.path import isfile, join
 from timeit import default_timer as timer
 
-DELETE_OLD_FLOW_FILES = True # if true, we will trash flow files once we are done
-DELETE_OLD_FLOW_IMAGES = True # if true, we will trash images used by flow once done
+DELETE_OLD_FLOW_FILES = False # if true, we will trash flow files once we are done
+DELETE_OLD_FLOW_IMAGES = False # if true, we will trash images used by flow once done
 
 current_process = None
 def signal_term_handler(signal, frame):
@@ -26,11 +26,11 @@ def signal_term_handler(signal, frame):
   sys.exit(0)
 
 RENDER_COMMAND_TEMPLATE = """
+GLOG_logbuflevel=-1
+GLOG_log_dir={LOG_DIR}
+GLOG_stderrthreshold=0
+GLOG_v={VERBOSE_LEVEL}
 {SURROUND360_RENDER_DIR}/bin/TestRenderStereoPanorama
---logbuflevel -1
---log_dir {LOG_DIR}
---stderrthreshold 0
---v {VERBOSE_LEVEL}
 --src_intrinsic_param_file {SRC_INTRINSIC_PARAM_FILE}
 --rig_json_file {RIG_JSON_FILE}
 --ring_rectify_file {RECTIFY_FILE}

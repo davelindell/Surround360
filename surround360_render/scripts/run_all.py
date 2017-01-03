@@ -53,13 +53,13 @@ UNPACK_COMMAND_TEMPLATE = """
 """
 
 ARRANGE_COMMAND_TEMPLATE = """
-python {SURROUND360_RENDER_DIR}/scripts/arrange_dataset.py
+python2 {SURROUND360_RENDER_DIR}/scripts/arrange_dataset.py
 --root_dir {ROOT_DIR}
 {FLAGS_ARRANGE_EXTRA}
 """
 
 ISP_COMMAND_TEMPLATE = """
-python {SURROUND360_RENDER_DIR}/scripts/batch_process_isp.py
+python2 {SURROUND360_RENDER_DIR}/scripts/batch_process_isp.py
 --surround360_render_dir {SURROUND360_RENDER_DIR}
 --root_dir {ROOT_DIR}
 --start_frame {START_FRAME}
@@ -80,7 +80,7 @@ RECTIFY_COMMAND_TEMPLATE = """
 """
 
 RENDER_COMMAND_TEMPLATE = """
-python {SURROUND360_RENDER_DIR}/scripts/batch_process_video.py
+python2 {SURROUND360_RENDER_DIR}/scripts/batch_process_video.py
 --flow_alg {FLOW_ALG}
 --root_dir {ROOT_DIR}
 --surround360_render_dir {SURROUND360_RENDER_DIR}
@@ -447,6 +447,7 @@ if __name__ == "__main__":
       "FLAGS_RENDER_EXTRA": render_extra_params,
     }
     render_command = RENDER_COMMAND_TEMPLATE.replace("\n", " ").format(**render_params)
+    print render_command
     run_step("render", render_command, verbose, dryrun, file_runtimes, num_steps)
 
   ### ffmpeg step ###
