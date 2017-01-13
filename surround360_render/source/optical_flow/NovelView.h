@@ -125,24 +125,29 @@ public:
     const vector<vector<Point3f>>& novelViewWarpBuffer,
     const Mat& srcImage,
     const Mat& opticalFlow,
-    const bool invertT) = 0;
+    const bool invertT,
+		Mat extraOpticalFlow = Mat(),
+		Mat extraImage = Mat()) = 0;
 
   // a LazyNovelViewBuffer contains all the data needed to render a chunk of a
   // stereo panorama. implementations should return a left/right eye image pair.
   // left and right image indices are passed in so we can get samples of matched
   // pixels for the purpose of color calibration.
-  virtual pair<Mat, Mat> combineLazyNovelViews(
+  virtual tuple<Mat, Mat, Mat, Mat> combineLazyNovelViews(
     const LazyNovelViewBuffer& lazyBuffer,
     const int leftImageIdx,
-    const int rightImageIdx) = 0;
+    const int rightImageIdx,
+	const vector<NovelViewGenerator*> *extraViewGenerators = 0) = 0;
 
   // for debugging
   virtual Mat getFlowLtoR() { return Mat(); }
   virtual Mat getFlowRtoL() { return Mat(); }
+  virtual Mat getImageL() { return Mat(); }
+  virtual Mat getImageR() { return Mat(); }
 };
 
 // this is a base class for novel view generators that work by reduction to optical flow.
-// it handles lazy generation fo the novel views, given flow.
+// it handles lazy generation for the novel views, given flow.
 class NovelViewGeneratorLazyFlow : public NovelViewGenerator {
 public:
   Mat imageL, imageR;
@@ -162,15 +167,20 @@ public:
     const vector<vector<Point3f>>& novelViewWarpBuffer,
     const Mat& srcImage,
     const Mat& opticalFlow,
-    const bool invertT);
+    const bool invertT,
+		Mat extraOpticalFlow = Mat(),
+		Mat extraImage = Mat());
 
-  pair<Mat, Mat> combineLazyNovelViews(
+  tuple<Mat, Mat, Mat, Mat> combineLazyNovelViews(
     const LazyNovelViewBuffer& lazyBuffer,
     const int leftImageIdx,
-    const int rightImageIdx);
+    const int rightImageIdx,
+		const vector<NovelViewGenerator*> *extraViewGenerators = 0);
 
   Mat getFlowLtoR() { return flowLtoR; }
   Mat getFlowRtoL() { return flowRtoL; }
+  Mat getImageL() { return imageL; }
+  Mat getImageR() { return imageR; }
 };
 
 // the name "asymmetric" here refers to the idea that we compute an optical flow from

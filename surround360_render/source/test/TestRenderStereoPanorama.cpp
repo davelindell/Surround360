@@ -53,6 +53,7 @@ DEFINE_string(output_data_dir,            "",             "path to write spheric
 DEFINE_string(prev_frame_data_dir,        "NONE",         "path to data for previous frame; used for temporal regularization");
 DEFINE_string(output_cubemap_path,        "",             "path to write output oculus 360 cubemap");
 DEFINE_string(output_equirect_path,       "",             "path to write output oculus 360 cubemap");
+DEFINE_string(output_flow_equirect_path,  "",             "path to write optical flow output oculus 360 cubemap");
 DEFINE_double(interpupilary_dist,         6.4,            "separation of eyes for stereo, spherical_in whatever units the rig json uses.");
 DEFINE_int32(side_alpha_feather_size,     100,            "alpha feather for projection of side cameras to spherical coordinates");
 DEFINE_int32(std_alpha_feather_size,      31,             "alpha feather for all other purposes. must be odd");
@@ -477,9 +478,12 @@ void renderStereoPanoramaChunksThread(
     const int numNovelViews,
     const float fovHorizontalRadians,
     const float vergeAtInfinitySlabDisplacement,
+	vector<NovelViewGenerator*> novelViewGenExtra,
     NovelViewGenerator* novelViewGen,
     Mat* chunkL,
-    Mat* chunkR) {
+    Mat* chunkR,
+	Mat* flowChunkL,
+	Mat* flowChunkR) {
 
   int currChunkX = 0; // current column in chunk to write
   LazyNovelViewBuffer lazyNovelViewBuffer(FLAGS_eqr_width / numCams, camImageHeight);
@@ -498,12 +502,15 @@ void renderStereoPanoramaChunksThread(
   }
 
   const int rightIdx = (leftIdx + 1) % numCams;
-  pair<Mat, Mat> lazyNovelChunksLR = novelViewGen->combineLazyNovelViews(
+  tuple<Mat, Mat, Mat, Mat> lazyNovelChunksLR = novelViewGen->combineLazyNovelViews(
     lazyNovelViewBuffer,
     leftIdx,
-    rightIdx);
-  *chunkL = lazyNovelChunksLR.first;
-  *chunkR = lazyNovelChunksLR.second;
+    rightIdx,
+	&novelViewGenExtra);
+  *chunkL = get<0>(lazyNovelChunksLR);
+  *chunkR = get<1>(lazyNovelChunksLR);
+  *flowChunkL = get<2>(lazyNovelChunksLR);
+  *flowChunkR = get<3>(lazyNovelChunksLR);
 }
 
 // generates a left/right eye equirect panorama using slices of novel views
@@ -513,6 +520,8 @@ void generateRingOfNovelViewsAndRenderStereoSpherical(
     vector<Mat>& projectionImages,
     Mat& panoImageL,
     Mat& panoImageR,
+	Mat& panoFlowImageL,
+	Mat& panoFlowImageR,
     double& opticalFlowRuntime,
     double& novelViewRuntime) {
 
@@ -568,8 +577,18 @@ void generateRingOfNovelViewsAndRenderStereoSpherical(
   // panorama. we do this so it can be parallelized.
   vector<Mat> panoChunksL(projectionImages.size(), Mat());
   vector<Mat> panoChunksR(projectionImages.size(), Mat());
+  vector<Mat> panoFlowChunksL(projectionImages.size(), Mat());
+  vector<Mat> panoFlowChunksR(projectionImages.size(), Mat());
   vector<std::thread> panoThreads;
+  // todo: add in extra image pairs to the right and left.
+  // note that the extrapolated time value will just be the -(1-t) and the column value
+  // for the left eye where the chunks exceed what is available would be shifting to the left of where the right pair chunks start
+
   for (int leftIdx = 0; leftIdx < projectionImages.size(); ++leftIdx) {
+	  vector<NovelViewGenerator*> novelViewGenExtra;
+	  novelViewGenExtra.push_back(novelViewGenerators[(leftIdx + projectionImages.size()-1) % projectionImages.size()]);
+	  novelViewGenExtra.push_back(novelViewGenerators[(leftIdx + 1) % projectionImages.size()]);
+
     panoThreads.push_back(std::thread(
       renderStereoPanoramaChunksThread,
       leftIdx,
@@ -579,9 +598,12 @@ void generateRingOfNovelViewsAndRenderStereoSpherical(
       numNovelViews,
       fovHorizontalRadians,
       vergeAtInfinitySlabDisplacement,
+			novelViewGenExtra,
       novelViewGenerators[leftIdx],
       &panoChunksL[leftIdx],
-      &panoChunksR[leftIdx]
+      &panoChunksR[leftIdx],
+	  &panoFlowChunksL[leftIdx],
+	  &panoFlowChunksR[leftIdx]
     ));
   }
   for (std::thread& t : panoThreads) { t.join(); }
@@ -597,6 +619,15 @@ void generateRingOfNovelViewsAndRenderStereoSpherical(
 
   panoImageL = offsetHorizontalWrap(panoImageL, zeroParallaxNovelViewShiftPixels);
   panoImageR = offsetHorizontalWrap(panoImageR, -zeroParallaxNovelViewShiftPixels);
+
+  imwrite("panoL.png",panoImageL);
+  imwrite("panoR.png",panoImageR);
+
+  panoFlowImageL = stackHorizontal(panoFlowChunksL);
+  panoFlowImageR = stackHorizontal(panoFlowChunksR);
+
+  panoFlowImageL = offsetHorizontalWrap(panoFlowImageL, zeroParallaxNovelViewShiftPixels);
+  panoFlowImageR = offsetHorizontalWrap(panoFlowImageR, -zeroParallaxNovelViewShiftPixels);
 }
 
 // handles flow between the fisheye top or bottom with the left/right eye side panoramas
@@ -914,7 +945,7 @@ void padToheight(Mat& unpaddedImage, const int targetHeight) {
 
 // run the whole stereo panorama rendering pipeline
 void renderStereoPanorama() {
-  requireArg(FLAGS_rig_json_file, "rig_json_file");
+   requireArg(FLAGS_rig_json_file, "rig_json_file");
   requireArg(FLAGS_imgs_dir, "imgs_dir");
   requireArg(FLAGS_output_data_dir, "output_data_dir");
   requireArg(FLAGS_output_equirect_path, "output_equirect_path");
@@ -963,7 +994,7 @@ void renderStereoPanorama() {
 
   // generate novel views and stereo spherical panoramas
   double opticalFlowRuntime, novelViewRuntime;
-  Mat sphericalImageL, sphericalImageR;
+  Mat sphericalImageL, sphericalImageR, sphericalFlowImageL, sphericalFlowImageR;
   LOG(INFO) << "Rendering stereo panorama";
   const double fovHorizontal = rig.isNewFormat()
     ? FLAGS_side_camera_h_fov_deg
@@ -974,6 +1005,8 @@ void renderStereoPanorama() {
     projectionImages,
     sphericalImageL,
     sphericalImageR,
+	sphericalFlowImageL,
+	sphericalFlowImageR,
     opticalFlowRuntime,
     novelViewRuntime);
 
@@ -1162,6 +1195,12 @@ void renderStereoPanorama() {
   LOG(INFO) << "Creating stereo equirectangular image";
   Mat stereoEquirect = stackVertical(vector<Mat>({sphericalImageL, sphericalImageR}));
   imwriteExceptionOnFail(FLAGS_output_equirect_path, stereoEquirect);
+
+  if (!FLAGS_output_flow_equirect_path.empty())
+  {
+	  Mat stereoEquirect = stackVertical(vector<Mat>({sphericalFlowImageL, sphericalFlowImageR}));
+	  imwriteExceptionOnFail(FLAGS_output_flow_equirect_path, stereoEquirect);
+  }
 
   if (FLAGS_enable_render_coloradjust &&
       !FLAGS_brightness_adjustment_dest.empty()) {

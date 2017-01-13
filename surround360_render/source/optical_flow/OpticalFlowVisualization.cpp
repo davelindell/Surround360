@@ -41,6 +41,7 @@ Mat visualizeFlowAsVectorField(const Mat& flow, const Mat& image) {
         const float mag = sqrt(fxy.x * fxy.x + fxy.y * fxy.y);
         const static float kEpsilon = 0.1f;
         fxy /= mag + kEpsilon;
+        circle(imageWithFlowLines, Point(x,y), 3, kGridColor);
         line(
           imageWithFlowLines,
           Point(x, y),
