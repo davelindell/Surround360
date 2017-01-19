@@ -1,37 +1,8 @@
+clear;
+
 % load optical flow and flow images
 imageL = double(imread('overlap_0_L.png'));
 imageR = double(imread('overlap_0_R.png'));
-
-opt = 1;
-if opt == 1
-    novelViewWarpBuffer = warpL;
-    invertT = 0;
-    [fx,fy] = readFlowFromFile('../flow/flowRtoL_0.bin');
-    [efx,efy] = readFlowFromFile('../flow/flowRtoL_1.bin');
-    img = imageL;
-    imgExtra = double(imread('overlap_1_L.png'));
-elseif opt == 2
-    novelViewWarpBuffer = warpL;
-    invertT = 1;
-    [fx,fy] = readFlowFromFile('../flow/flowLtoR_0.bin');
-    [efx,efy] = readFlowFromFile('../flow/flowRtoL_1.bin');
-    img = double(imread('overlap_1_R.png'));
-    imgExtra = image1L;    
-elseif opt == 3
-    novelViewWarpBuffer = warpR;
-    invertT = 0;
-    [fx,fy] = readFlowFromFile('../flow/flowRtoL_0.bin');
-    [efx,efy] = readFlowFromFile('../flow/flowLtoR_13.bin');
-    img = imageL;
-    imgExtra = double(imread('overlap_13_R.png'));
-elseif opt == 4
-    novelViewWarpBuffer = warpR;
-    invertT = 1;
-    [fx,fy] = readFlowFromFile('../flow/flowLtoR_0.bin');
-    [efx,efy] = readFlowFromFile('../flow/flowLtoR_13.bin');
-    img = imageR;
-    imgExtra = double(imread('overlap_13_R.png'));
-end
 
 currChunkX = 1; 
 numCams = 14;
@@ -41,7 +12,6 @@ numNovelViews = 450;
 vergeAtInfinitySlabDisplacement = 279.554718;
 warpL = [];
 warpR = [];
-
 
 % calculate where the chunks are in the image
 for nvIdx = 0:numNovelViews-1
@@ -60,6 +30,36 @@ for nvIdx = 0:numNovelViews-1
     currChunkX = currChunkX + 1;
 end
 
+opt = 2;
+if opt == 1
+    novelViewWarpBuffer = warpL;
+    invertT = 0;
+    [fx,fy] = readFlowFromFile('../flow/flowRtoL_0.bin');
+    [efx,efy] = readFlowFromFile('../flow/flowRtoL_1.bin');
+    img = imageL;
+    imgExtra = double(imread('overlap_1_L.png'));
+elseif opt == 2
+    novelViewWarpBuffer = warpL;
+    invertT = 1;
+    [fx,fy] = readFlowFromFile('../flow/flowLtoR_0.bin');
+    [efx,efy] = readFlowFromFile('../flow/flowRtoL_1.bin');
+    img = imageR;
+    imgExtra = double(imread('overlap_1_L.png'));  
+elseif opt == 3
+    novelViewWarpBuffer = warpR;
+    invertT = 0;
+    [fx,fy] = readFlowFromFile('../flow/flowRtoL_0.bin');
+    [efx,efy] = readFlowFromFile('../flow/flowLtoR_13.bin');
+    img = imageL;
+    imgExtra = double(imread('overlap_13_R.png'));
+elseif opt == 4
+    novelViewWarpBuffer = warpR;
+    invertT = 1;
+    [fx,fy] = readFlowFromFile('../flow/flowLtoR_0.bin');
+    [efx,efy] = readFlowFromFile('../flow/flowLtoR_13.bin');
+    img = imageR;
+    imgExtra = double(imread('overlap_13_R.png'));
+end
 
 width = numNovelViews;
 height = camImageHeight;
@@ -79,7 +79,6 @@ if (startX < 0)
     offset = -450;
     overrun_idx = ceil(limitX-startX)+1;
 end
-
 
 warpOpticalFlow = zeros(height, width,2);
 extraWarpOpticalFlow = zeros(height,width,2);
@@ -144,9 +143,11 @@ for ii = 1:3
 end
 
 figure;
-imagesc([novelView(:,1:overrun_idx,:)/200 novelViewExtra(:,1:(width - overrun_idx),:)/200])
-% imagesc([novelViewExtra(:,1:overrun_idx,:)/200 novelView(:,overrun_idx+1:end,:)/200])
-
+if opt <= 2
+    imagesc([novelView(:,1:overrun_idx,:)/200 novelViewExtra(:,1:(width - overrun_idx),:)/200])
+elseif opt >= 3
+    imagesc([novelViewExtra(:,1:overrun_idx,:)/200 novelView(:,overrun_idx+1:end,:)/200])
+end
 
 axis image
 

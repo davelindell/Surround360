@@ -620,9 +620,6 @@ void generateRingOfNovelViewsAndRenderStereoSpherical(
   panoImageL = offsetHorizontalWrap(panoImageL, zeroParallaxNovelViewShiftPixels);
   panoImageR = offsetHorizontalWrap(panoImageR, -zeroParallaxNovelViewShiftPixels);
 
-  imwrite("panoL.png",panoImageL);
-  imwrite("panoR.png",panoImageR);
-
   panoFlowImageL = stackHorizontal(panoFlowChunksL);
   panoFlowImageR = stackHorizontal(panoFlowChunksR);
 
@@ -1199,6 +1196,9 @@ void renderStereoPanorama() {
   if (!FLAGS_output_flow_equirect_path.empty())
   {
 	  Mat stereoEquirect = stackVertical(vector<Mat>({sphericalFlowImageL, sphericalFlowImageR}));
+//	  FileStorage fs(FLAGS_output_flow_equirect_path, FileStorage::WRITE);
+//	  fs << "flow" << stereoEquirect;
+//	  fs.release();
 	  imwriteExceptionOnFail(FLAGS_output_flow_equirect_path, stereoEquirect);
   }
 

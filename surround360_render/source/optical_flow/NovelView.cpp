@@ -131,11 +131,14 @@ Mat NovelViewUtil::combineLazyViews(
 
         // log the colors that are being blended so we can adjust the images
         // color/brightness (requires a second pass/re-render).
-        colorSampleLogger.addSample(
-          leftImageIdx,
-          rightImageIdx,
-          colorL,
-          colorR);
+
+      	if (leftImageIdx != -1 && rightImageIdx != -1) {
+      		colorSampleLogger.addSample(
+      				leftImageIdx,
+							rightImageIdx,
+							colorL,
+							colorR);
+      	}
 
         const float magL = flowMagL.at<float>(y,x) / float(imageL.cols);
         const float magR = flowMagR.at<float>(y,x) / float(imageL.cols);
@@ -199,30 +202,31 @@ pair<Mat, Mat> NovelViewGeneratorLazyFlow::renderLazyNovelView(
 		Mat extraOpticalFlow,
 		Mat extraImage) {
 
-  // a composition of remap
-  // This is just taking the portion of the optical flow image which we need to do our rendered views
-	bool useExtraViews = 1;
-	float startX = novelViewWarpBuffer[0][0].x;
-	float limitX;
-	float offset;
-  int viewWidth;
+  // parameters to estimate pixels in extra view to be used
+	bool useExtraViews = 0;
+	const int viewOverlap = 16;									// number of pixels to overlap between image and extrapolated image
+	float startX = novelViewWarpBuffer[0][0].x; // x position at which chunks start
+	float limitX;															  // last chunk index within bounds
+	int offset;																	// pixel offset between first chunk of extra image and overlapIdx
+  int overlapIdx;															// index of last in-bounds pixel
 
 	float endX = startX + width;
-	if (startX > 0) {
-		limitX = srcImage.cols;
-	 	offset = endX - limitX + 1;
-	 	viewWidth = floor(limitX-startX);
+	if (startX > 0) { // if using left image
+		limitX = srcImage.cols - 1;
+		overlapIdx = floor(limitX-startX);
+	 	offset = width - overlapIdx;
 	}
 	else {
 		limitX = 0;
-		offset = -450;
-		viewWidth = ceil(limitX - startX) + 1;
+		offset = -width;
+		overlapIdx = floor(limitX - startX);
 	}
 
 	if (startX < 0 || endX > limitX) {
-		useExtraViews = 0;
+		useExtraViews = 1;
 	}
 
+	// grab chunks from overlap image
   Mat warpOpticalFlow = Mat(Size(width, height), CV_32FC2);
   Mat extraWarpOpticalFlow = Mat(Size(width,height), CV_32FC2);
   for (int y = 0; y < height; ++y) {
@@ -237,31 +241,6 @@ pair<Mat, Mat> NovelViewGeneratorLazyFlow::renderLazyNovelView(
   remap(opticalFlow, remappedFlow, warpOpticalFlow, Mat(), CV_INTER_CUBIC);
   Mat extraRemappedFlow;
   remap(extraOpticalFlow, extraRemappedFlow, extraWarpOpticalFlow, Mat(), CV_INTER_CUBIC);
-
-//#ifdef DEBUG
-//  if (!first)
-//  {
-//	  first = 1;
-//	  vector<Mat> opticalFlowChannels(2);
-//	  vector<Mat> remappedFlowChannels(2);
-//	  vector<Mat> warpOpticalFlowChannels(2);
-//
-//	  cv::split(opticalFlow, opticalFlowChannels);
-//	  cv::split(remappedFlow, remappedFlowChannels);
-//	  cv::split(warpOpticalFlow, warpOpticalFlowChannels);
-//
-//	  imwrite("./opticalFlowX.png",opticalFlowChannels[0]);
-//	  imwrite("./opticalFlowY.png",opticalFlowChannels[1]);
-//
-//	  imwrite("./remappedFlowX.png",remappedFlowChannels[0]);
-//	  imwrite("./remappedFlowY.png",remappedFlowChannels[1]);
-//
-//	  imwrite("./warpOpticalFlowX.png",warpOpticalFlowChannels[0]);
-//	  imwrite("./warpOpticalFlowY.png",warpOpticalFlowChannels[1]);
-//  }
-//
-//
-//#endif
 
   // Optical flow from original pixels to novel view pixels
   Mat warpComposition = Mat(Size(width, height), CV_32FC2);
@@ -281,9 +260,9 @@ pair<Mat, Mat> NovelViewGeneratorLazyFlow::renderLazyNovelView(
 
       float extraT;
       if (startX > 0)
-      	 extraT = (-int(offset) + x) / numNovelViews;
+      	 extraT = (-offset + x) / numNovelViews;
       else
-      	 extraT = (-x) / numNovelViews;
+      	 extraT = -x/ numNovelViews;
 
       extraWarpComposition.at<Point2f>(y, x) =
         Point2f(lazyWarp.x - offset + extraFlowDir.x * extraT, lazyWarp.y + extraFlowDir.y * extraT);
@@ -293,26 +272,81 @@ pair<Mat, Mat> NovelViewGeneratorLazyFlow::renderLazyNovelView(
   // this remap generates the novel view from the optical flow
   Mat novelView;
   remap(srcImage, novelView, warpComposition, Mat(), CV_INTER_CUBIC);
-  imwrite("novelView.png",novelView);
 
   if (useExtraViews) {
 		Mat extraNovelView;
 		remap(extraImage, extraNovelView, extraWarpComposition, Mat(), CV_INTER_CUBIC);
-		imwrite("extraNovelView.png",extraNovelView);
 
 		Mat tmp;
+		Mat weight(Size(width, height), CV_32FC1);
+		Mat weightExtra(Size(width, height), CV_32FC1);
+		Mat imgL(Size(width, height), srcImage.type());
+		Mat imgR(Size(width, height), srcImage.type());
+		Mat combined;
+
 		if (startX > 0) {
-			tmp = novelView(Rect(0,0,viewWidth,novelView.rows));
-			extraImage = extraNovelView(Rect(0,0,width-viewWidth,novelView.rows));
-			hconcat(tmp, extraImage, tmp);
+			int mergeIdxL = overlapIdx - int(viewOverlap) + 1;
+			int mergeIdxR = overlapIdx;
+			tmp = novelView(Rect(0,0,overlapIdx+1,novelView.rows)).clone();
+			extraImage = extraNovelView(Rect(0,0,width-(overlapIdx+1),novelView.rows));
+			hconcat(tmp, extraImage, combined);
+
+//			for (int y = 0; y < height; ++y) {
+//				for (int x = 0; x < width; ++x) {
+//					if (x <= mergeIdxL) {
+//						weight.at<float>(y,x) = 1;
+//						weightExtra.at<float>(y,x) = 0;
+//						imgL.at<Vec4b>(y,x) = novelView.at<Vec4b>(y,x);
+//						imgR.at<Vec4b>(y,x) = Vec4b(0,0,0,0);
+//					}
+//					else if (x >= mergeIdxR) {
+//						weightExtra.at<float>(y,x) = 1;
+//						weight.at<float>(y,x) = 0;
+//						imgL.at<Vec4b>(y,x) = Vec4b(0,0,0,0);
+//						imgR.at<Vec4b>(y,x) = extraNovelView.at<Vec4b>(y,x - mergeIdxR - 1 + width - (overlapIdx + 1));
+//					}
+//					else {
+//						weightExtra.at<float>(y,x) = ( x - mergeIdxL) / viewOverlap;
+//						weight.at<float>(y,x) = 1 - ( x - mergeIdxL) / viewOverlap;
+//						imgL.at<Vec4b>(y,x) = novelView.at<Vec4b>(y,x);
+//						imgR.at<Vec4b>(y,x) = extraNovelView.at<Vec4b>(y,x - mergeIdxR - 1 + width - (overlapIdx + 1));
+//					}
+//				}
+//			}
+//			combined = NovelViewUtil::combineLazyViews(imgL, imgR, weight, weightExtra,-1, -1);
+
 		}
 		else  {
-			tmp = novelView(Rect(viewWidth,0,width - viewWidth,novelView.rows));
-			extraImage = extraNovelView(Rect(0,0,viewWidth,novelView.rows));
-			hconcat(extraImage, tmp, tmp);
+			int mergeIdxL = overlapIdx;
+			int mergeIdxR = overlapIdx + int(viewOverlap)-1;
+			tmp = novelView(Rect(overlapIdx+1,0,width - (overlapIdx+1),novelView.rows));
+			extraImage = extraNovelView(Rect(0,0,overlapIdx+1,novelView.rows));
+			//hconcat(extraImage, tmp, tmp);
+			for (int y = 0; y < height; ++y) {
+				for (int x = 0; x < width; ++x) {
+					if (x <= mergeIdxL) {
+						weightExtra.at<float>(y,x) = 1;
+						weight.at<float>(y,x) = 0;
+						imgL.at<Vec4b>(y,x) = extraNovelView.at<Vec4b>(y,x);
+						imgR.at<Vec4b>(y,x) = Vec4b(0,0,0,0);
+					}
+					else if (x >= mergeIdxR) {
+						weight.at<float>(y,x) = 1;
+						weightExtra.at<float>(y,x) = 0;
+						imgL.at<Vec4b>(y,x) = Vec4b(0,0,0,0);
+						imgR.at<Vec4b>(y,x) = novelView.at<Vec4b>(y,x);
+					}
+					else {
+						weight.at<float>(y,x) = ( x - mergeIdxL) / viewOverlap;
+						weightExtra.at<float>(y,x) = 1 - ( x - mergeIdxL) / viewOverlap;
+						imgL.at<Vec4b>(y,x) = extraNovelView.at<Vec4b>(y,x);
+						imgR.at<Vec4b>(y,x) = novelView.at<Vec4b>(y,x);
+					}
+				}
+			}
+			combined = NovelViewUtil::combineLazyViews(imgL, imgR, weightExtra, weight,-1, -1);
 		}
-		novelView = tmp;
-		imwrite("combinedView.png",novelView);
+		novelView = combined;
   }
 
   Mat novelViewFlowMag(novelView.size(), CV_32F);
@@ -322,32 +356,33 @@ pair<Mat, Mat> NovelViewGeneratorLazyFlow::renderLazyNovelView(
   // then use it to blend the two later.
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
-    	if (((x > viewWidth-1 && startX > 0) || (x < viewWidth + 1 && startX < 0)) && useExtraViews) {
-        const Point3f lazyWarp = novelViewWarpBuffer[x][y];
-        Point2f flowDir = extraRemappedFlow.at<Point2f>(y, x-viewWidth);
+    	Point3f lazyWarp;
+    	Point2f flowDir;
+    	float t;
 
-        if (startX > 0)
-        	const float t = (-int(offset) + x - viewWidth) / numNovelViews;
+    	// if iterating over 'extra' image pixels
+    	if (((x > overlapIdx && startX > 0) || (x <= overlapIdx && startX < 0)) && useExtraViews) {
+        lazyWarp = novelViewWarpBuffer[x][y];
+        if (x > overlapIdx)
+        	 flowDir = extraRemappedFlow.at<Point2f>(y, x-(overlapIdx+1));
         else
-        	const float t = (-x) / numNovelViews;
+        	flowDir = extraRemappedFlow.at<Point2f>(y, x);
 
-        novelView.at<Vec4b>(y, x)[3] =
-          int(0.5 * novelView.at<Vec4b>(y, x)[3]);
-        novelViewFlowMag.at<float>(y, x) =
-          sqrtf(flowDir.x * flowDir.x + flowDir.y * flowDir.y);
+        t = 0.5;
     	}
-    	else {
-        const Point3f lazyWarp = novelViewWarpBuffer[x][y];
-        Point2f flowDir = remappedFlow.at<Point2f>(y, x);
-        const float t = invertT ? (1.0f - lazyWarp.z) : lazyWarp.z;
-        novelView.at<Vec4b>(y, x)[3] =
-          int((1.0f - t) * novelView.at<Vec4b>(y, x)[3]);
-        novelViewFlowMag.at<float>(y, x) =
-          sqrtf(flowDir.x * flowDir.x + flowDir.y * flowDir.y);
+    	else { // iterating of normal image pixels
+    		int xOffset = 0;
+    		if (x > overlapIdx && startX < 0)
+    			xOffset = overlapIdx + 1;
+
+        lazyWarp = novelViewWarpBuffer[x - xOffset][y];
+        flowDir = remappedFlow.at<Point2f>(y, x - xOffset);
+        t = invertT ? (1.0f - lazyWarp.z) : lazyWarp.z;
     	}
-
-
-
+      novelView.at<Vec4b>(y, x)[3] =
+        int((1.0f - t) * novelView.at<Vec4b>(y, x)[3]);
+      novelViewFlowMag.at<float>(y, x) =
+        sqrtf(flowDir.x * flowDir.x + flowDir.y * flowDir.y);
     }
   }
   return make_pair(novelView, novelViewFlowMag);
@@ -358,11 +393,6 @@ tuple<Mat, Mat, Mat, Mat> NovelViewGeneratorLazyFlow::combineLazyNovelViews(
     const int leftImageIdx,
     const int rightImageIdx,
 		const vector<NovelViewGenerator*> *extraViewGenerators) {
-
-//		Mat imLFlowRtoL = visualizeFlowAsVectorField(flowRtoL,imageL);
-//		Mat imRFlowLtoR = visualizeFlowAsVectorField(flowLtoR,imageR);
-//		imwrite("./imLFlowRtoL.png",imLFlowRtoL);
-//		imwrite("./imRFlowLtoR.png",imRFlowLtoR);
 
   // two images for the left eye (to be combined)
   pair<Mat, Mat> leftEyeFromLeft = renderLazyNovelView(
